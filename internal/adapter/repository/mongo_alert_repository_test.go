@@ -1,10 +1,12 @@
 package repository
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/shopally-ai/internal/mocks"
 	"github.com/shopally-ai/pkg/domain"
+	"github.com/shopally-ai/pkg/usecase"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -110,6 +112,12 @@ func TestMockAlertRepository(t *testing.T) {
 		if err == nil {
 			t.Fatal("GetAlert for a non-existent ID did not return an error")
 		}
+		// Must be the sentinel, not just any error: handlers map this cause to
+		// 404 and everything else to 500, so a bare error would make a storage
+		// failure indistinguishable from a missing alert.
+		if !errors.Is(err, usecase.ErrAlertNotFound) {
+			t.Errorf("got error %v, want it to wrap usecase.ErrAlertNotFound", err)
+		}
 	})
 
 	t.Run("DeleteAlert_Success", func(t *testing.T) {
@@ -119,15 +127,15 @@ func TestMockAlertRepository(t *testing.T) {
 		}
 
 		_, err = repo.GetAlert(createdAlertID)
-		if err == nil {
-			t.Fatal("Alert was not deleted as expected")
+		if !errors.Is(err, usecase.ErrAlertNotFound) {
+			t.Fatalf("alert was not deleted as expected: got error %v", err)
 		}
 	})
 
 	t.Run("DeleteAlert_NotFound", func(t *testing.T) {
 		err := repo.DeleteAlert("non-existent-id")
-		if err == nil {
-			t.Fatal("DeleteAlert for a non-existent ID did not return an error")
+		if !errors.Is(err, usecase.ErrAlertNotFound) {
+			t.Errorf("got error %v, want it to wrap usecase.ErrAlertNotFound", err)
 		}
 	})
 }

@@ -2,72 +2,171 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/shopally-ai/internal/adapter/handler"
-
 	"github.com/shopally-ai/internal/adapter/gateway"
-
+	"github.com/shopally-ai/internal/adapter/handler"
+	"github.com/shopally-ai/internal/adapter/http/router"
+	"github.com/shopally-ai/internal/adapter/repository"
 	"github.com/shopally-ai/internal/config"
 	"github.com/shopally-ai/internal/platform"
 	"github.com/shopally-ai/pkg/usecase"
+
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
+// shutdownGrace bounds how long in-flight requests get to finish.
+const shutdownGrace = 10 * time.Second
+
 func main() {
-	// Load configuration
 	cfg, err := config.LoadConfig(".")
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// Connect to MongoDB using custom db package
-	client, err := platform.Connect(cfg.Mongo.URI)
-	if err != nil {
-		log.Fatalf("failed to connect to MongoDB: %v", err)
-	}
+	// Mongo and Redis are both optional at startup. Nothing on the currently
+	// mounted routes needs them, so an outage degrades /healthz rather than
+	// preventing the API from serving search and FX.
+	mongoClient := connectMongo(cfg.Mongo.URI)
 	defer func() {
-		if err := platform.Disconnect(client); err != nil {
-			log.Printf("failed to disconnect MongoDB: %v", err)
+		if mongoClient == nil {
+			return
+		}
+		if err := platform.Disconnect(mongoClient); err != nil {
+			log.Printf("mongo disconnect: %v", err)
 		}
 	}()
-	db := client.Database(cfg.Mongo.Database)
 
-	fmt.Printf("Connected to MongoDB database: %s\n", db.Name())
+	redisClient := connectRedis(cfg)
 
-	// Initialize Redis client
+	// A nil cache is a supported configuration: the use case falls back to
+	// calling the gateways directly.
+	var cache usecase.ICachePort
+	if redisClient != nil {
+		cache = gateway.NewRedisCache(redisClient.Client, cfg.Redis.KeyPrefix)
+	}
+
+	// Product and intent data come from mocks for now. Both sit behind the
+	// gateway interfaces, so swapping in the real HTTP adapters is a change
+	// to these two lines only.
+	searchUC := usecase.NewSearchProductsUseCase(
+		gateway.NewMockAlibabaGateway(),
+		gateway.NewMockLLMGateway(),
+		cache,
+	)
+
+	fxClient := gateway.NewCachedFXClient(
+		gateway.NewFXHTTPGateway(cfg.FX.APIURL, cfg.FX.APIKEY, nil),
+		cache,
+		time.Duration(cfg.FX.CacheTTLSeconds)*time.Second,
+	)
+
+	alertManager := usecase.NewAlertManager(repository.NewMockAlertRepository())
+
+	engine := router.Build(
+		router.Deps{
+			Health: handler.NewHealthHandler(healthChecks(mongoClient, redisClient)),
+			Search: handler.NewSearchHandler(searchUC),
+			FX:     handler.NewFXHandler(fxClient),
+			Alerts: handler.NewAlertHandler(alertManager),
+		},
+		router.Options{
+			BasePath:       "/api/v1",
+			AllowedOrigins: cfg.CORSOrigins(),
+			Production:     cfg.IsProduction(),
+		},
+	)
+
+	srv := &http.Server{
+		Addr:              ":" + cfg.Server.Port,
+		Handler:           engine,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	serveUntilSignal(srv, cfg.CORSOrigins())
+}
+
+// connectMongo attempts a connection and returns nil on failure rather than
+// exiting, so a Mongo outage cannot take the whole API down.
+func connectMongo(uri string) *mongo.Client {
+	client, err := platform.Connect(uri)
+	if err != nil {
+		log.Printf("mongo unavailable at startup, continuing without it: %v", err)
+		return nil
+	}
+	log.Println("mongo connected")
+	return client
+}
+
+// connectRedis pings Redis and returns nil if it is unreachable.
+func connectRedis(cfg *config.Config) *platform.Client {
 	rdb := platform.NewRedisClient(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password, cfg.Redis.DB)
 
-	// Test Redis connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := rdb.Ping(ctx); err != nil {
-		log.Printf("⚠️  Redis connection failed: %v (continuing without Redis)", err)
-		rdb = nil
-	} else {
-		log.Println("✅ Redis connected")
+		log.Printf("redis unavailable at startup, continuing without cache: %v", err)
+		return nil
+	}
+	log.Println("redis connected")
+	return rdb
+}
+
+// healthChecks builds the dependency probes for /healthz. Each closure
+// re-checks live, so a dependency that recovers is reported as healthy
+// without needing a restart.
+func healthChecks(mongoClient *mongo.Client, redisClient *platform.Client) map[string]handler.DependencyCheck {
+	return map[string]handler.DependencyCheck{
+		"mongo": func(ctx context.Context) error {
+			if mongoClient == nil {
+				return errors.New("not connected at startup")
+			}
+			return mongoClient.Ping(ctx, nil)
+		},
+		"redis": func(ctx context.Context) error {
+			if redisClient == nil {
+				return errors.New("not connected at startup")
+			}
+			return redisClient.Client.Ping(ctx).Err()
+		},
+	}
+}
+
+// serveUntilSignal runs the server and drains it on SIGINT/SIGTERM so hosted
+// deploys and container restarts do not sever in-flight requests.
+func serveUntilSignal(srv *http.Server, origins []string) {
+	errCh := make(chan error, 1)
+
+	go func() {
+		log.Printf("api listening on %s (cors allowlist: %v)", srv.Addr, origins)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-errCh:
+		log.Fatalf("server error: %v", err)
+	case sig := <-stop:
+		log.Printf("received %s, shutting down", sig)
 	}
 
-	// Initialize router
-	router := gin.Default()
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
 
-	// Construct mock gateways and use case for mocked search flow
-	ag := gateway.NewMockAlibabaGateway()
-	lg := gateway.NewMockLLMGateway()
-	uc := usecase.NewSearchProductsUseCase(ag, lg, nil)
-
-	// Initialize handlers
-	searchHandler := handler.NewSearchHandler(uc)
-
-	// Register routes
-	searchHandler.RegisterRoutes(router)
-
-	// Start the server
-	log.Println("Starting server on port", cfg.Server.Port)
-	if err := router.Run(":" + cfg.Server.Port); err != nil {
-		log.Fatalf("could not start server: %v", err)
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("graceful shutdown failed: %v", err)
+		return
 	}
+	log.Println("shutdown complete")
 }

@@ -1,0 +1,44 @@
+# Local development dependencies for the ShopAlly backend.
+#
+# This brings up only Mongo and Redis; run the API itself with `go run
+# ./cmd/api` so you keep a fast edit/reload loop. The default config in
+# configs/config.dev.example.yaml already points at these ports.
+#
+#   docker compose up -d
+#   go run ./cmd/api
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: shopally-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: shopally-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # Persist to disk so a restart does not drop the FX cache.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo-data:
+  redis-data:

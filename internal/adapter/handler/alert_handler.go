@@ -2,11 +2,12 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/shopally-ai/pkg/domain"
 	"github.com/shopally-ai/pkg/usecase"
 )
@@ -18,125 +19,125 @@ type AlertHandler struct {
 
 // NewAlertHandler creates a new AlertHandler with the given AlertManager.
 func NewAlertHandler(am *usecase.AlertManager) *AlertHandler {
-	return &AlertHandler{
-		alertManager: am,
-	}
+	return &AlertHandler{alertManager: am}
 }
 
-// successResponse represents a standard API response structure.
-type successResponse struct {
-	Data  interface{} `json:"data"`
-	Error interface{} `json:"error"`
-}
-
-// createAlertPayload represents the expected payload for creating an alert.
+// createAlertPayload is the expected body for creating an alert.
+//
+// UserID is intentionally absent: trusting a client-supplied owner would let
+// any caller create alerts for anyone. It is taken from the authenticated
+// context once RequireAuth is in place, which is also when these routes get
+// mounted.
 type createAlertPayload struct {
-	UserID      string  `json:"userId"`
 	ProductID   string  `json:"productId"`
 	TargetPrice float64 `json:"targetPrice"`
 }
 
-// CreateAlertHandler handles POST requests to create a new alert.
-func (h *AlertHandler) CreateAlertHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+// CreateAlert handles POST /alerts.
+func (h *AlertHandler) CreateAlert(c *gin.Context) {
+	var payload createAlertPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respondError(c, http.StatusBadRequest, CodeInvalidInput, "request body is not valid JSON")
 		return
 	}
 
-	var payload createAlertPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if strings.TrimSpace(payload.ProductID) == "" {
+		respondError(c, http.StatusBadRequest, CodeInvalidInput, "productId is required")
+		return
+	}
+	if payload.TargetPrice <= 0 {
+		respondError(c, http.StatusBadRequest, CodeInvalidInput, "targetPrice must be greater than zero")
+		return
+	}
+
+	userID, ok := UserIDFrom(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	newAlert := &domain.Alert{
-		UserID:      payload.UserID,
+		UserID:      userID,
 		ProductID:   payload.ProductID,
 		TargetPrice: payload.TargetPrice,
 		IsActive:    true,
 	}
 
 	if err := h.alertManager.CreateAlert(newAlert); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create alert: %v", err), http.StatusInternalServerError)
+		log.Printf("create alert request_id=%s user=%s error=%v", RequestIDFrom(c), userID, err)
+		respondError(c, http.StatusInternalServerError, CodeInternal, "could not create alert")
 		return
 	}
 
-	response := successResponse{
-		Data: map[string]string{
-			"status":  "Alert created successfully",
-			"alertId": newAlert.ID,
-		},
-		Error: nil,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated) // 201 Created
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	respondOK(c, http.StatusCreated, map[string]string{"alertId": newAlert.ID})
 }
 
-// GetAlertHandler handles GET requests to retrieve an alert by its ID.
-func (h *AlertHandler) GetAlertHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+// GetAlert handles GET /alerts/:id.
+func (h *AlertHandler) GetAlert(c *gin.Context) {
+	alert, ok := h.loadOwnedAlert(c)
+	if !ok {
+		return
+	}
+	respondOK(c, http.StatusOK, alert)
+}
+
+// DeleteAlert handles DELETE /alerts/:id.
+func (h *AlertHandler) DeleteAlert(c *gin.Context) {
+	alert, ok := h.loadOwnedAlert(c)
+	if !ok {
 		return
 	}
 
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) != 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+	if err := h.alertManager.DeleteAlert(alert.ID); err != nil {
+		// A not-found here means it was removed between the read and the
+		// delete, which is the caller's desired end state anyway.
+		if errors.Is(err, usecase.ErrAlertNotFound) {
+			respondOK(c, http.StatusOK, map[string]string{"alertId": alert.ID})
+			return
+		}
+		log.Printf("delete alert request_id=%s id=%s error=%v", RequestIDFrom(c), alert.ID, err)
+		respondError(c, http.StatusInternalServerError, CodeInternal, "could not delete alert")
 		return
 	}
-	alertID := parts[2]
+
+	respondOK(c, http.StatusOK, map[string]string{"alertId": alert.ID})
+}
+
+// loadOwnedAlert fetches the alert named in the path and verifies the caller
+// owns it. It writes the error response itself and reports false when the
+// request should not proceed.
+//
+// A caller who does not own an alert gets 404 rather than 403, so alert IDs
+// cannot be probed for existence.
+func (h *AlertHandler) loadOwnedAlert(c *gin.Context) (*domain.Alert, bool) {
+	userID, ok := UserIDFrom(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, CodeUnauthorized, "authentication required")
+		return nil, false
+	}
+
+	alertID := strings.TrimSpace(c.Param("id"))
+	if alertID == "" {
+		respondError(c, http.StatusBadRequest, CodeInvalidInput, "alert id is required")
+		return nil, false
+	}
 
 	alert, err := h.alertManager.GetAlert(alertID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to retrieve alert: %v", err), http.StatusNotFound)
-		return
+		if errors.Is(err, usecase.ErrAlertNotFound) {
+			respondError(c, http.StatusNotFound, CodeNotFound, "alert not found")
+			return nil, false
+		}
+		// A storage failure is not a missing alert.
+		log.Printf("get alert request_id=%s id=%s error=%v", RequestIDFrom(c), alertID, err)
+		respondError(c, http.StatusInternalServerError, CodeInternal, "could not load alert")
+		return nil, false
 	}
 
-	response := successResponse{
-		Data:  alert,
-		Error: nil,
+	if alert.UserID != userID {
+		respondError(c, http.StatusNotFound, CodeNotFound, "alert not found")
+		return nil, false
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK) // 200 OK
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
-}
-
-// DeleteAlertHandler handles DELETE requests to remove an alert by its ID.
-func (h *AlertHandler) DeleteAlertHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) != 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
-		return
-	}
-	alertID := parts[2]
-
-	if err := h.alertManager.DeleteAlert(alertID); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to delete alert: %v", err), http.StatusNotFound)
-		return
-	}
-
-	response := successResponse{
-		Data: map[string]string{
-			"status": "Alert deleted successfully",
-		},
-		Error: nil,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK) // 200 OK
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-	}
+	return alert, true
 }

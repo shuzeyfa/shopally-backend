@@ -1,11 +1,13 @@
 package handler
 
 import (
-	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/shopally-ai/pkg/usecase"
 )
 
@@ -25,11 +27,11 @@ type fxResponse struct {
 	Converted float64 `json:"converted"`
 }
 
-func (h *FXHandler) GetFX(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	from := strings.ToUpper(strings.Trim(strings.TrimSpace(r.URL.Query().Get("from")), "\"'"))
-	to := strings.ToUpper(strings.Trim(strings.TrimSpace(r.URL.Query().Get("to")), "\"'"))
+// GetFX handles GET /fx?from=&to=&amount=.
+// Defaults to converting 1 USD to ETB, the pairing the product UI needs.
+func (h *FXHandler) GetFX(c *gin.Context) {
+	from := normalizeCurrency(c.Query("from"))
+	to := normalizeCurrency(c.Query("to"))
 	if from == "" {
 		from = "USD"
 	}
@@ -38,28 +40,42 @@ func (h *FXHandler) GetFX(w http.ResponseWriter, r *http.Request) {
 	}
 
 	amount := 1.0
-	if s := strings.TrimSpace(r.URL.Query().Get("amount")); s != "" {
+	if s := strings.TrimSpace(c.Query("amount")); s != "" {
 		a, err := strconv.ParseFloat(s, 64)
 		if err != nil || a < 0 {
-			http.Error(w, "invalid amount", http.StatusBadRequest)
+			respondError(c, http.StatusBadRequest, CodeInvalidInput,
+				"amount must be a non-negative number")
 			return
 		}
 		amount = a
 	}
 
-	rate, err := h.FX.GetRate(ctx, from, to)
+	rate, err := h.FX.GetRate(c.Request.Context(), from, to)
 	if err != nil {
-		http.Error(w, "fx error: "+err.Error(), http.StatusBadGateway)
+		// Upstream detail is logged by the gateway with the API key redacted;
+		// the client only learns that conversion is unavailable.
+		if errors.Is(err, usecase.ErrFXUnavailable) || errors.Is(err, usecase.ErrFXUnrecognized) {
+			respondError(c, http.StatusBadGateway, CodeFXUnavailable,
+				"currency conversion is temporarily unavailable")
+			return
+		}
+		log.Printf("fx request_id=%s from=%s to=%s error=%v", RequestIDFrom(c), from, to, err)
+		respondError(c, http.StatusBadGateway, CodeFXUnavailable,
+			"currency conversion is temporarily unavailable")
 		return
 	}
 
-	resp := fxResponse{
+	respondOK(c, http.StatusOK, fxResponse{
 		From:      from,
 		To:        to,
 		Rate:      rate,
 		Amount:    amount,
 		Converted: rate * amount,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	})
+}
+
+// normalizeCurrency upper-cases a currency code and strips the stray quotes
+// that shell and URL-encoding mistakes tend to leave behind.
+func normalizeCurrency(raw string) string {
+	return strings.ToUpper(strings.Trim(strings.TrimSpace(raw), "\"'"))
 }

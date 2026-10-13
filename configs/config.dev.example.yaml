@@ -1,0 +1,70 @@
+# ShopAlly backend — development configuration
+#
+# Copy this file to configs/config.dev.yaml and adjust. Every value here is a
+# default that already works for local development via docker-compose, so an
+# unedited copy will boot.
+#
+# This file is optional. Any key can be supplied as an environment variable
+# instead, using the upper-cased path with dots replaced by underscores:
+#
+#   server.port       -> SERVER_PORT
+#   mongo.uri         -> MONGO_URI
+#   auth.jwt_secret   -> AUTH_JWT_SECRET
+#   fx.api_key        -> FX_API_KEY
+#
+# Environment variables win over this file, which is how hosted deploys
+# (Render, Fly.io, Cloud Run) are configured — they inject env, not files.
+# Never commit real secrets: configs/config.dev.yaml is gitignored.
+
+server:
+  port: "8080"
+  # Set to "production" on a deployed instance. Switches gin out of debug mode.
+  env: development
+
+cors:
+  # Comma-separated origin allowlist. The frontend's origin must appear here or
+  # the browser will block every request. An empty value rejects all
+  # cross-origin calls; there is no wildcard.
+  allowed_origins: "http://localhost:3000"
+
+auth:
+  # Must match the frontend's NEXTAUTH_SECRET exactly. The Next.js app signs an
+  # HS256 token with this value and the API verifies it. Generate one with:
+  #   openssl rand -base64 32
+  jwt_secret: ""
+
+mongo:
+  uri: "mongodb://localhost:27017"
+  database: shopally
+  alert_collection: alerts
+
+redis:
+  host: localhost
+  port: "6379"
+  password: ""
+  db: 0
+  view_tracking_ttl: 86400
+  key_prefix: "sa:"
+
+fx:
+  # Leave api_url empty to use the keyless exchangerate.host default.
+  # Supported providers and their URL shapes (placeholders are substituted):
+  #   https://api.exchangerate.host/convert?from={FROM}&to={TO}
+  #   https://api.currencyfreaks.com/latest?apikey={APIKEY}&symbols={TO}
+  #   https://open.er-api.com/v6/latest/{FROM}
+  #   https://v6.exchangerate-api.com/v6/{APIKEY}/latest/{FROM}
+  api_url: ""
+  api_key: ""
+  cache_ttl_seconds: 3600
+
+oauth:
+  google:
+    client_id: ""
+    client_secret: ""
+    redirect_uri: "http://localhost:3000/api/auth/callback/google"
+  # Reserved for the real AliExpress product gateway. Not used while the
+  # mock gateway is in place.
+  aliexpress:
+    client_id: ""
+    client_secret: ""
+    redirect_uri: ""

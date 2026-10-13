@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,6 +15,11 @@ import (
 
 	"github.com/shopally-ai/pkg/usecase"
 )
+
+// Provider failures are reported as usecase.ErrFXUnavailable and
+// usecase.ErrFXUnrecognized. Neither carries provider detail: the request URL
+// embeds the API key (see buildRequestURL), and the provider's response body
+// can echo it back. Details are logged with the key redacted instead.
 
 // FXHTTPGateway is an outbound adapter that calls a configurable FX HTTP API.
 // It implements usecase.IFXClient.
@@ -57,7 +63,11 @@ func (g *FXHTTPGateway) GetRate(ctx context.Context, from, to string) (float64, 
 		return 0, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return 0, fmt.Errorf("fx api non-ok: %d - %s", resp.StatusCode, string(body))
+		// Log the body for diagnosis; never return it. Providers frequently
+		// echo the request URL (API key included) in error payloads.
+		log.Printf("fx provider non-ok status=%d url=%s body=%s",
+			resp.StatusCode, g.redact(reqURL), g.redact(string(body)))
+		return 0, usecase.ErrFXUnavailable
 	}
 
 	// Try multiple known shapes
@@ -101,7 +111,17 @@ func (g *FXHTTPGateway) GetRate(ctx context.Context, from, to string) (float64, 
 		}
 	}
 
-	return 0, fmt.Errorf("unrecognized fx response for %s", reqURL)
+	log.Printf("fx provider unrecognized response url=%s body=%s",
+		g.redact(reqURL), g.redact(string(body)))
+	return 0, usecase.ErrFXUnrecognized
+}
+
+// redact removes the API key from text bound for a log sink.
+func (g *FXHTTPGateway) redact(s string) string {
+	if g.APIKey == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, g.APIKey, "***")
 }
 
 func (g *FXHTTPGateway) buildRequestURL(from, to string) string {

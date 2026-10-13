@@ -25,7 +25,7 @@ test: tools
 	@PATH=$(BIN_DIR):$$PATH gotestsum --format=$(TEST_FORMAT) -- -race -count=1 $(TEST_ARGS) ./...
 
 # Keep go.mod/go.sum tidy
- tidy:
+tidy:
 	$(GO) mod tidy
 
 clean:

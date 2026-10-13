@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -18,36 +19,23 @@ func NewSearchHandler(uc *usecase.SearchProductsUseCase) *SearchHandler {
 	return &SearchHandler{uc: uc}
 }
 
-type envelope struct {
-	Data  interface{} `json:"data"`
-	Error interface{} `json:"error"`
-}
-
-// Search handles GET /search and returns the envelope with mocked products.
+// Search handles GET /search?q=.
 func (h *SearchHandler) Search(c *gin.Context) {
-	// Basic required param validation per contract
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
-		c.JSON(http.StatusBadRequest, envelope{Data: nil, Error: map[string]interface{}{
-			"code":    "INVALID_INPUT",
-			"message": "missing required query parameter: q",
-		}})
+		respondError(c, http.StatusBadRequest, CodeInvalidInput,
+			"missing required query parameter: q")
 		return
 	}
 
 	data, err := h.uc.Search(c.Request.Context(), q)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, envelope{Data: nil, Error: map[string]interface{}{
-			"code":    "INTERNAL_SERVER_ERROR",
-			"message": err.Error(),
-		}})
+		// The underlying error can name an upstream provider; log it and keep
+		// the client-facing message generic.
+		log.Printf("search request_id=%s q=%q error=%v", RequestIDFrom(c), q, err)
+		respondError(c, http.StatusInternalServerError, CodeInternal, "search failed")
 		return
 	}
 
-	c.JSON(http.StatusOK, envelope{Data: data, Error: nil})
-}
-
-// RegisterRoutes sets up the routing for the search handler using Gin.
-func (h *SearchHandler) RegisterRoutes(router *gin.Engine) {
-	router.GET("/search", h.Search)
+	respondOK(c, http.StatusOK, data)
 }

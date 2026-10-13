@@ -12,7 +12,10 @@
 /vendor/
 
 # Config files
-configs/
+# The real config holds secrets and stays local; the example is committed so a
+# fresh clone knows what keys exist.
+configs/*
+!configs/*.example.yaml
 
 #Environment files
 .env
