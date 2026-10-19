@@ -5,12 +5,13 @@ import "github.com/gin-gonic/gin"
 // Error codes returned in the envelope's error.code field. The frontend keys
 // its error handling off these, so treat them as part of the API contract.
 const (
-	CodeInvalidInput  = "INVALID_INPUT"
-	CodeUnauthorized  = "UNAUTHORIZED"
-	CodeForbidden     = "FORBIDDEN"
-	CodeNotFound      = "NOT_FOUND"
-	CodeFXUnavailable = "FX_UNAVAILABLE"
-	CodeInternal      = "INTERNAL_SERVER_ERROR"
+	CodeInvalidInput       = "INVALID_INPUT"
+	CodeUnauthorized       = "UNAUTHORIZED"
+	CodeForbidden          = "FORBIDDEN"
+	CodeNotFound           = "NOT_FOUND"
+	CodeFXUnavailable      = "FX_UNAVAILABLE"
+	CodeServiceUnavailable = "SERVICE_UNAVAILABLE"
+	CodeInternal           = "INTERNAL_SERVER_ERROR"
 )
 
 // APIError is the error half of the response envelope.

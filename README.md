@@ -51,8 +51,9 @@ underscores, and override the file. Hosted deploys use these exclusively:
 See `configs/config.dev.example.yaml` for the full set.
 
 Mongo and Redis are both **optional at startup**. If either is unreachable the
-API still serves search and FX; `/healthz` reports the degradation. Without
-Redis, FX rates are fetched per request instead of cached.
+API still serves search and FX; `/healthz` reports the degradation. Saved-item
+requests return `503` while Mongo is unavailable. Without Redis, FX rates are
+fetched per request instead of cached.
 
 ## API
 
@@ -65,24 +66,25 @@ clients branch on `error !== null`:
 ```
 
 Error codes: `INVALID_INPUT`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`,
-`FX_UNAVAILABLE`, `INTERNAL_SERVER_ERROR`.
+`FX_UNAVAILABLE`, `SERVICE_UNAVAILABLE`, `INTERNAL_SERVER_ERROR`.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/healthz` | — | Liveness plus per-dependency status. 503 if any dependency is down |
 | `GET` | `/api/v1/search?q=` | — | Product search. `q` is required |
 | `GET` | `/api/v1/fx?from=&to=&amount=` | — | Currency conversion. Defaults to 1 USD→ETB |
+| `POST` | `/api/v1/compare` | — | Compare 2–4 products by ID |
+| `GET` | `/api/v1/saved` | Bearer token | List the caller's saved products |
+| `POST` | `/api/v1/saved` | Bearer token | Save or refresh a product |
+| `DELETE` | `/api/v1/saved/:productId` | Bearer token | Remove a saved product |
 
-### Not yet mounted
+### Price alerts
 
-Alert handlers (`POST`/`GET`/`DELETE /alerts`) are implemented and tested but
-deliberately **not routed**: they require an authenticated user ID, and the
-auth middleware does not exist yet. Mounting them before then would let any
-caller create and delete alerts belonging to anyone.
+Alert endpoints are authenticated but still use in-memory storage. Phase 7
+replaces that adapter with Mongo persistence and adds alert evaluation.
 
-`compare_handler.go`, `compare_products.go`, `alibaba_http_gateway.go`,
-`llm_http_gateway.go`, `fcm_http_gateway.go` and `platform/queue.go` are
-placeholders awaiting their features.
+The AliExpress, LLM, and FCM HTTP adapters and `platform/queue.go` remain
+placeholders for their later integration work.
 
 ## Product data is mocked
 

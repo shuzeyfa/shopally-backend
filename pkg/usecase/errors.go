@@ -25,4 +25,6 @@ var (
 
 	// ErrInvalidComparisonCount means fewer than 2 or more than 4 products were requested.
 	ErrInvalidComparisonCount = errors.New("comparison requires between 2 and 4 products")
+
+	ErrSavedStoreUnavailable = errors.New("saved items storage unavailable")
 )

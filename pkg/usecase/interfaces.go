@@ -40,3 +40,9 @@ type AlertRepository interface {
 	GetAlert(alertID string) (*domain.Alert, error)
 	DeleteAlert(alertID string) error
 }
+
+type SavedItemsRepository interface {
+	Save(ctx context.Context, userID string, product *domain.Product) (*domain.SavedItem, error)
+	List(ctx context.Context, userID string) ([]*domain.SavedItem, error)
+	Delete(ctx context.Context, userID, productID string) error
+}

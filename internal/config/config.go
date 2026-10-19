@@ -45,6 +45,7 @@ type Config struct {
 		URI             string `mapstructure:"uri"`
 		Database        string `mapstructure:"database"`
 		AlertCollection string `mapstructure:"alert_collection"`
+		SavedCollection string `mapstructure:"saved_collection"`
 	} `mapstructure:"mongo"`
 
 	Redis struct {
@@ -111,6 +112,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mongo.uri", "mongodb://localhost:27017")
 	v.SetDefault("mongo.database", "shopally")
 	v.SetDefault("mongo.alert_collection", "alerts")
+	v.SetDefault("mongo.saved_collection", "saved_items")
 
 	v.SetDefault("redis.host", "localhost")
 	v.SetDefault("redis.port", "6379")

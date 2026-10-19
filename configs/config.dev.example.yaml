@@ -37,6 +37,7 @@ mongo:
   uri: "mongodb://localhost:27017"
   database: shopally
   alert_collection: alerts
+  saved_collection: saved_items
 
 redis:
   host: localhost

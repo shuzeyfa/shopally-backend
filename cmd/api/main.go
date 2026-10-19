@@ -42,9 +42,9 @@ func main() {
 			handler.MinTokenSecretLength)
 	}
 
-	// Mongo and Redis are both optional at startup. Nothing on the currently
-	// mounted routes needs them, so an outage degrades /healthz rather than
-	// preventing the API from serving search and FX.
+	// Mongo and Redis are optional at startup. An outage degrades /healthz
+	// rather than preventing the API from serving search and FX; saved-item
+	// requests return a storage-unavailable response until Mongo recovers.
 	mongoClient := connectMongo(cfg.Mongo.URI)
 	defer func() {
 		if mongoClient == nil {
@@ -80,6 +80,7 @@ func main() {
 	)
 
 	alertManager := usecase.NewAlertManager(repository.NewMockAlertRepository())
+	savedRepository := repository.NewMongoSavedRepository(mongoClient, cfg.Mongo.Database, cfg.Mongo.SavedCollection)
 	compareUC := usecase.NewCompareProductsUseCase(gateway.NewMockAlibabaGateway(), cache)
 
 	engine := router.Build(
@@ -89,6 +90,7 @@ func main() {
 			FX:      handler.NewFXHandler(fxClient),
 			Compare: handler.NewCompareHandler(compareUC),
 			Alerts:  handler.NewAlertHandler(alertManager),
+			Saved:   handler.NewSavedHandler(savedRepository),
 		},
 		router.Options{
 			BasePath:       "/api/v1",

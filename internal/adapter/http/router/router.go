@@ -14,7 +14,7 @@ import (
 
 // Deps contains the handlers the router should mount.
 type Deps struct {
-	Health *apphandler.HealthHandler
+	Health  *apphandler.HealthHandler
 	Search  *apphandler.SearchHandler
 	FX      *apphandler.FXHandler
 	Compare *apphandler.CompareHandler
@@ -22,6 +22,7 @@ type Deps struct {
 	// Alerts is mounted behind RequireAuth and takes its owner from the
 	// verified token, never from the request body.
 	Alerts *apphandler.AlertHandler
+	Saved  *apphandler.SavedHandler
 }
 
 // Options control router behavior.
@@ -91,6 +92,11 @@ func Build(d Deps, opts Options) *gin.Engine {
 		protected.POST("/alerts", d.Alerts.CreateAlert)
 		protected.GET("/alerts/:id", d.Alerts.GetAlert)
 		protected.DELETE("/alerts/:id", d.Alerts.DeleteAlert)
+	}
+	if d.Saved != nil {
+		protected.POST("/saved", d.Saved.Save)
+		protected.GET("/saved", d.Saved.List)
+		protected.DELETE("/saved/:productId", d.Saved.Delete)
 	}
 
 	return r
