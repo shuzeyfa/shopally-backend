@@ -31,6 +31,7 @@ func NewAlertHandler(am *usecase.AlertManager) *AlertHandler {
 type createAlertPayload struct {
 	ProductID   string  `json:"productId"`
 	TargetPrice float64 `json:"targetPrice"`
+	Currency    string  `json:"currency"`
 }
 
 // CreateAlert handles POST /alerts.
@@ -49,6 +50,14 @@ func (h *AlertHandler) CreateAlert(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, CodeInvalidInput, "targetPrice must be greater than zero")
 		return
 	}
+	payload.Currency = strings.ToUpper(strings.TrimSpace(payload.Currency))
+	if payload.Currency == "" {
+		payload.Currency = "ETB"
+	}
+	if payload.Currency != "ETB" && payload.Currency != "USD" {
+		respondError(c, http.StatusBadRequest, CodeInvalidInput, "currency must be ETB or USD")
+		return
+	}
 
 	userID, ok := UserIDFrom(c)
 	if !ok {
@@ -60,16 +69,32 @@ func (h *AlertHandler) CreateAlert(c *gin.Context) {
 		UserID:      userID,
 		ProductID:   payload.ProductID,
 		TargetPrice: payload.TargetPrice,
+		Currency:    payload.Currency,
 		IsActive:    true,
 	}
 
-	if err := h.alertManager.CreateAlert(newAlert); err != nil {
+	if err := h.alertManager.CreateAlert(c.Request.Context(), newAlert); err != nil {
 		log.Printf("create alert request_id=%s user=%s error=%v", RequestIDFrom(c), userID, err)
-		respondError(c, http.StatusInternalServerError, CodeInternal, "could not create alert")
+		respondStorageError(c)
 		return
 	}
 
 	respondOK(c, http.StatusCreated, map[string]string{"alertId": newAlert.ID})
+}
+
+func (h *AlertHandler) ListAlerts(c *gin.Context) {
+	userID, ok := UserIDFrom(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, CodeUnauthorized, "authentication required")
+		return
+	}
+	alerts, err := h.alertManager.ListAlerts(c.Request.Context(), userID)
+	if err != nil {
+		log.Printf("list alerts request_id=%s user=%s error=%v", RequestIDFrom(c), userID, err)
+		respondStorageError(c)
+		return
+	}
+	respondOK(c, http.StatusOK, alerts)
 }
 
 // GetAlert handles GET /alerts/:id.
@@ -83,24 +108,27 @@ func (h *AlertHandler) GetAlert(c *gin.Context) {
 
 // DeleteAlert handles DELETE /alerts/:id.
 func (h *AlertHandler) DeleteAlert(c *gin.Context) {
-	alert, ok := h.loadOwnedAlert(c)
+	userID, ok := UserIDFrom(c)
 	if !ok {
+		respondError(c, http.StatusUnauthorized, CodeUnauthorized, "authentication required")
 		return
 	}
-
-	if err := h.alertManager.DeleteAlert(alert.ID); err != nil {
-		// A not-found here means it was removed between the read and the
-		// delete, which is the caller's desired end state anyway.
+	alertID := strings.TrimSpace(c.Param("id"))
+	if alertID == "" {
+		respondError(c, http.StatusBadRequest, CodeInvalidInput, "alert id is required")
+		return
+	}
+	if err := h.alertManager.DeleteAlert(c.Request.Context(), userID, alertID); err != nil {
 		if errors.Is(err, usecase.ErrAlertNotFound) {
-			respondOK(c, http.StatusOK, map[string]string{"alertId": alert.ID})
+			respondError(c, http.StatusNotFound, CodeNotFound, "alert not found")
 			return
 		}
-		log.Printf("delete alert request_id=%s id=%s error=%v", RequestIDFrom(c), alert.ID, err)
-		respondError(c, http.StatusInternalServerError, CodeInternal, "could not delete alert")
+		log.Printf("delete alert request_id=%s id=%s error=%v", RequestIDFrom(c), alertID, err)
+		respondStorageError(c)
 		return
 	}
 
-	respondOK(c, http.StatusOK, map[string]string{"alertId": alert.ID})
+	respondOK(c, http.StatusOK, map[string]string{"alertId": alertID})
 }
 
 // loadOwnedAlert fetches the alert named in the path and verifies the caller
@@ -122,7 +150,7 @@ func (h *AlertHandler) loadOwnedAlert(c *gin.Context) (*domain.Alert, bool) {
 		return nil, false
 	}
 
-	alert, err := h.alertManager.GetAlert(alertID)
+	alert, err := h.alertManager.GetAlert(c.Request.Context(), userID, alertID)
 	if err != nil {
 		if errors.Is(err, usecase.ErrAlertNotFound) {
 			respondError(c, http.StatusNotFound, CodeNotFound, "alert not found")
@@ -134,10 +162,9 @@ func (h *AlertHandler) loadOwnedAlert(c *gin.Context) (*domain.Alert, bool) {
 		return nil, false
 	}
 
-	if alert.UserID != userID {
-		respondError(c, http.StatusNotFound, CodeNotFound, "alert not found")
-		return nil, false
-	}
-
 	return alert, true
+}
+
+func respondStorageError(c *gin.Context) {
+	respondError(c, http.StatusServiceUnavailable, CodeServiceUnavailable, "alerts are temporarily unavailable")
 }

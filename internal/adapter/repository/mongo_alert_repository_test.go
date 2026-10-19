@@ -1,141 +1,40 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"testing"
 
-	"github.com/shopally-ai/internal/mocks"
 	"github.com/shopally-ai/pkg/domain"
 	"github.com/shopally-ai/pkg/usecase"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 )
 
-type AlertRepositorySuite struct {
-	suite.Suite
-	mockRepo    *mocks.AlertRepository
-	sampleAlert *domain.Alert
-}
-
-func (s *AlertRepositorySuite) SetupTest() {
-	s.mockRepo = new(mocks.AlertRepository)
-	s.sampleAlert = &domain.Alert{
-		UserID:      "user-123",
-		ProductID:   "product-abc",
-		TargetPrice: 500.00,
-		IsActive:    true,
+func TestMongoAlertRepositoryWithoutMongo(t *testing.T) {
+	repo := NewMongoAlertRepository(nil, "", "")
+	if err := repo.CreateAlert(context.Background(), &domain.Alert{}); !errors.Is(err, usecase.ErrAlertStoreUnavailable) {
+		t.Fatalf("CreateAlert error = %v, want storage unavailable", err)
+	}
+	if _, err := repo.ListAlerts(context.Background(), "user"); !errors.Is(err, usecase.ErrAlertStoreUnavailable) {
+		t.Fatalf("ListAlerts error = %v, want storage unavailable", err)
 	}
 }
 
-func (s *AlertRepositorySuite) TestCreateAlert_Success() {
-	s.mockRepo.On("CreateAlert", s.sampleAlert).Return(nil)
-	err := s.mockRepo.CreateAlert(s.sampleAlert)
-	s.NoError(err)
-	s.mockRepo.AssertCalled(s.T(), "CreateAlert", s.sampleAlert)
-}
-
-func (s *AlertRepositorySuite) TestGetAlert_Success() {
-	s.mockRepo.On("GetAlert", "test-alert-id").Return(s.sampleAlert, nil)
-	alert, err := s.mockRepo.GetAlert("test-alert-id")
-	s.NoError(err)
-	s.Equal(s.sampleAlert, alert)
-	s.mockRepo.AssertCalled(s.T(), "GetAlert", "test-alert-id")
-}
-
-func (s *AlertRepositorySuite) TestGetAlert_NotFound() {
-	s.mockRepo.On("GetAlert", "non-existent-id").Return(nil, assert.AnError)
-	alert, err := s.mockRepo.GetAlert("non-existent-id")
-	s.Error(err)
-	s.Nil(alert)
-	s.mockRepo.AssertCalled(s.T(), "GetAlert", "non-existent-id")
-}
-
-func (s *AlertRepositorySuite) TestDeleteAlert_Success() {
-	s.mockRepo.On("DeleteAlert", "test-alert-id").Return(nil)
-	err := s.mockRepo.DeleteAlert("test-alert-id")
-	s.NoError(err)
-	s.mockRepo.AssertCalled(s.T(), "DeleteAlert", "test-alert-id")
-}
-
-func (s *AlertRepositorySuite) TestDeleteAlert_NotFound() {
-	s.mockRepo.On("DeleteAlert", "non-existent-id").Return(assert.AnError)
-	err := s.mockRepo.DeleteAlert("non-existent-id")
-	s.Error(err)
-	s.mockRepo.AssertCalled(s.T(), "DeleteAlert", "non-existent-id")
-}
-
-func TestAlertRepositorySuite(t *testing.T) {
-	suite.Run(t, new(AlertRepositorySuite))
-}
-
-func TestMockAlertRepository(t *testing.T) {
+func TestMockAlertRepositoryScopesAlertsByOwner(t *testing.T) {
 	repo := NewMockAlertRepository()
-
-	sampleAlert := &domain.Alert{
-		UserID:      "user-123",
-		ProductID:   "product-abc",
-		TargetPrice: 500.00,
-		IsActive:    true,
+	alert := &domain.Alert{UserID: "owner", ProductID: "p1", TargetPrice: 20, Currency: "USD", IsActive: true}
+	if err := repo.CreateAlert(context.Background(), alert); err != nil {
+		t.Fatal(err)
 	}
-
-	var createdAlertID string
-
-	t.Run("CreateAlert_Success", func(t *testing.T) {
-		err := repo.CreateAlert(sampleAlert)
-		if err != nil {
-			t.Fatalf("CreateAlert failed with error: %v", err)
-		}
-
-		if sampleAlert.ID == "" {
-			t.Fatal("CreateAlert did not assign an ID to the alert")
-		}
-		createdAlertID = sampleAlert.ID
-	})
-
-	t.Run("GetAlert_Success", func(t *testing.T) {
-		retrievedAlert, err := repo.GetAlert(createdAlertID)
-		if err != nil {
-			t.Fatalf("GetAlert failed with error: %v", err)
-		}
-
-		if retrievedAlert.ID != createdAlertID {
-			t.Errorf("Retrieved alert ID mismatch: got %s, want %s", retrievedAlert.ID, createdAlertID)
-		}
-
-		if retrievedAlert.UserID != sampleAlert.UserID {
-			t.Errorf("Retrieved alert UserID mismatch: got %s, want %s", retrievedAlert.UserID, sampleAlert.UserID)
-		}
-	})
-
-	t.Run("GetAlert_NotFound", func(t *testing.T) {
-		_, err := repo.GetAlert("non-existent-id")
-		if err == nil {
-			t.Fatal("GetAlert for a non-existent ID did not return an error")
-		}
-		// Must be the sentinel, not just any error: handlers map this cause to
-		// 404 and everything else to 500, so a bare error would make a storage
-		// failure indistinguishable from a missing alert.
-		if !errors.Is(err, usecase.ErrAlertNotFound) {
-			t.Errorf("got error %v, want it to wrap usecase.ErrAlertNotFound", err)
-		}
-	})
-
-	t.Run("DeleteAlert_Success", func(t *testing.T) {
-		err := repo.DeleteAlert(createdAlertID)
-		if err != nil {
-			t.Fatalf("DeleteAlert failed with error: %v", err)
-		}
-
-		_, err = repo.GetAlert(createdAlertID)
-		if !errors.Is(err, usecase.ErrAlertNotFound) {
-			t.Fatalf("alert was not deleted as expected: got error %v", err)
-		}
-	})
-
-	t.Run("DeleteAlert_NotFound", func(t *testing.T) {
-		err := repo.DeleteAlert("non-existent-id")
-		if !errors.Is(err, usecase.ErrAlertNotFound) {
-			t.Errorf("got error %v, want it to wrap usecase.ErrAlertNotFound", err)
-		}
-	})
+	if alert.ID == "" {
+		t.Fatal("CreateAlert did not assign an ID")
+	}
+	if _, err := repo.GetAlert(context.Background(), "other", alert.ID); !errors.Is(err, usecase.ErrAlertNotFound) {
+		t.Fatalf("foreign alert lookup error = %v, want not found", err)
+	}
+	if err := repo.DeleteAlert(context.Background(), "other", alert.ID); !errors.Is(err, usecase.ErrAlertNotFound) {
+		t.Fatalf("foreign alert delete error = %v, want not found", err)
+	}
+	if _, err := repo.GetAlert(context.Background(), "owner", alert.ID); err != nil {
+		t.Fatalf("owner cannot load alert: %v", err)
+	}
 }

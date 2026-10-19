@@ -90,6 +90,7 @@ func Build(d Deps, opts Options) *gin.Engine {
 
 	if d.Alerts != nil {
 		protected.POST("/alerts", d.Alerts.CreateAlert)
+		protected.GET("/alerts", d.Alerts.ListAlerts)
 		protected.GET("/alerts/:id", d.Alerts.GetAlert)
 		protected.DELETE("/alerts/:id", d.Alerts.DeleteAlert)
 	}

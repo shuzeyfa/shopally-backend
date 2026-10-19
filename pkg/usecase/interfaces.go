@@ -36,9 +36,12 @@ type IFXClient interface {
 }
 
 type AlertRepository interface {
-	CreateAlert(alert *domain.Alert) error
-	GetAlert(alertID string) (*domain.Alert, error)
-	DeleteAlert(alertID string) error
+	CreateAlert(ctx context.Context, alert *domain.Alert) error
+	ListAlerts(ctx context.Context, userID string) ([]*domain.Alert, error)
+	GetAlert(ctx context.Context, userID, alertID string) (*domain.Alert, error)
+	DeleteAlert(ctx context.Context, userID, alertID string) error
+	ListActiveAlerts(ctx context.Context) ([]*domain.Alert, error)
+	MarkAlertTriggered(ctx context.Context, alertID string, price float64, at time.Time) error
 }
 
 type SavedItemsRepository interface {

@@ -79,7 +79,7 @@ func main() {
 		time.Duration(cfg.FX.CacheTTLSeconds)*time.Second,
 	)
 
-	alertManager := usecase.NewAlertManager(repository.NewMockAlertRepository())
+	alertManager := usecase.NewAlertManager(repository.NewMongoAlertRepository(mongoClient, cfg.Mongo.Database, cfg.Mongo.AlertCollection))
 	savedRepository := repository.NewMongoSavedRepository(mongoClient, cfg.Mongo.Database, cfg.Mongo.SavedCollection)
 	compareUC := usecase.NewCompareProductsUseCase(gateway.NewMockAlibabaGateway(), cache)
 

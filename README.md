@@ -77,11 +77,18 @@ Error codes: `INVALID_INPUT`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`,
 | `GET` | `/api/v1/saved` | Bearer token | List the caller's saved products |
 | `POST` | `/api/v1/saved` | Bearer token | Save or refresh a product |
 | `DELETE` | `/api/v1/saved/:productId` | Bearer token | Remove a saved product |
+| `GET` | `/api/v1/alerts` | Bearer token | List the caller's price alerts |
+| `POST` | `/api/v1/alerts` | Bearer token | Create an alert with `productId`, `targetPrice`, and optional `currency` (`ETB` or `USD`) |
+| `GET` | `/api/v1/alerts/:id` | Bearer token | Get one of the caller's alerts |
+| `DELETE` | `/api/v1/alerts/:id` | Bearer token | Remove one of the caller's alerts |
 
 ### Price alerts
 
-Alert endpoints are authenticated but still use in-memory storage. Phase 7
-replaces that adapter with Mongo persistence and adds alert evaluation.
+Alerts are stored in the configured Mongo collection (`mongo.alert_collection`).
+The worker checks active targets once per minute and records when a target is
+reached; the alerts page refreshes periodically to show that status. Product
+prices are still mocked, and push notifications remain future work with the
+FCM adapter.
 
 The AliExpress, LLM, and FCM HTTP adapters and `platform/queue.go` remain
 placeholders for their later integration work.

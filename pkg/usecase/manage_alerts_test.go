@@ -1,10 +1,12 @@
 package usecase
 
 import (
+	"context"
 	"fmt"
 	"github.com/shopally-ai/pkg/domain"
 	"sync"
 	"testing"
+	"time"
 )
 
 type mockAlertRepository struct {
@@ -15,7 +17,7 @@ func newMockAlertRepository() *mockAlertRepository {
 	return &mockAlertRepository{}
 }
 
-func (m *mockAlertRepository) CreateAlert(alert *domain.Alert) error {
+func (m *mockAlertRepository) CreateAlert(_ context.Context, alert *domain.Alert) error {
 	if alert.ID == "" {
 		alert.ID = "test-alert-id"
 	}
@@ -23,18 +25,40 @@ func (m *mockAlertRepository) CreateAlert(alert *domain.Alert) error {
 	return nil
 }
 
-func (m *mockAlertRepository) GetAlert(alertID string) (*domain.Alert, error) {
+func (m *mockAlertRepository) ListAlerts(_ context.Context, userID string) ([]*domain.Alert, error) {
+	result := make([]*domain.Alert, 0)
+	m.alerts.Range(func(_, value any) bool {
+		alert := value.(*domain.Alert)
+		if alert.UserID == userID {
+			result = append(result, alert)
+		}
+		return true
+	})
+	return result, nil
+}
+
+func (m *mockAlertRepository) GetAlert(_ context.Context, userID, alertID string) (*domain.Alert, error) {
 	if value, ok := m.alerts.Load(alertID); ok {
-		return value.(*domain.Alert), nil
+		alert := value.(*domain.Alert)
+		if alert.UserID == userID {
+			return alert, nil
+		}
 	}
 	return nil, fmt.Errorf("alert with ID %s not found", alertID)
 }
 
-func (m *mockAlertRepository) DeleteAlert(alertID string) error {
-	if _, ok := m.alerts.Load(alertID); !ok {
+func (m *mockAlertRepository) DeleteAlert(_ context.Context, userID, alertID string) error {
+	if alert, ok := m.alerts.Load(alertID); !ok || alert.(*domain.Alert).UserID != userID {
 		return fmt.Errorf("alert with ID %s not found", alertID)
 	}
 	m.alerts.Delete(alertID)
+	return nil
+}
+
+func (m *mockAlertRepository) ListActiveAlerts(_ context.Context) ([]*domain.Alert, error) {
+	return nil, nil
+}
+func (m *mockAlertRepository) MarkAlertTriggered(_ context.Context, _ string, _ float64, _ time.Time) error {
 	return nil
 }
 
@@ -50,7 +74,7 @@ func TestAlertManager_UseCases(t *testing.T) {
 
 	var createdAlertID string
 	t.Run("CreateAlert_Success", func(t *testing.T) {
-		err := alertManager.CreateAlert(sampleAlert)
+		err := alertManager.CreateAlert(context.Background(), sampleAlert)
 		if err != nil {
 			t.Fatalf("CreateAlert failed: %v", err)
 		}
@@ -60,7 +84,7 @@ func TestAlertManager_UseCases(t *testing.T) {
 		createdAlertID = sampleAlert.ID
 	})
 	t.Run("GetAlert_Success", func(t *testing.T) {
-		retrievedAlert, err := alertManager.GetAlert(createdAlertID)
+		retrievedAlert, err := alertManager.GetAlert(context.Background(), "user-123", createdAlertID)
 		if err != nil {
 			t.Fatalf("GetAlert failed: %v", err)
 		}
@@ -70,26 +94,26 @@ func TestAlertManager_UseCases(t *testing.T) {
 	})
 
 	t.Run("GetAlert_NotFound", func(t *testing.T) {
-		_, err := alertManager.GetAlert("non-existent-id")
+		_, err := alertManager.GetAlert(context.Background(), "user-123", "non-existent-id")
 		if err == nil {
 			t.Fatal("GetAlert for non-existent ID did not return an error")
 		}
 	})
 
 	t.Run("DeleteAlert_Success", func(t *testing.T) {
-		err := alertManager.DeleteAlert(createdAlertID)
+		err := alertManager.DeleteAlert(context.Background(), "user-123", createdAlertID)
 		if err != nil {
 			t.Fatalf("DeleteAlert failed: %v", err)
 		}
 
-		_, err = alertManager.GetAlert(createdAlertID)
+		_, err = alertManager.GetAlert(context.Background(), "user-123", createdAlertID)
 		if err == nil {
 			t.Fatal("Alert was not deleted as expected")
 		}
 	})
 
 	t.Run("DeleteAlert_NotFound", func(t *testing.T) {
-		err := alertManager.DeleteAlert("non-existent-id")
+		err := alertManager.DeleteAlert(context.Background(), "user-123", "non-existent-id")
 		if err == nil {
 			t.Fatal("DeleteAlert for non-existent ID did not return an error")
 		}
