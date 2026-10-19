@@ -28,7 +28,7 @@ func main() {
 	productGateway := gateway.NewMockAlibabaGateway()
 	evaluator := usecase.NewAlertEvaluator(alertRepo, productGateway)
 
-	rc := platform.NewRedisClient(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password, cfg.Redis.DB)
+	rc := platform.NewRedisClient(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password, cfg.Redis.DB, cfg.Redis.TLS)
 	redisReady := false
 	if err := rc.Ping(context.Background()); err != nil {
 		log.Printf("redis unavailable; will retry in background: %v", err)

@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: shopally-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: SERVER_PORT
+        value: "10000"
+      - key: SERVER_ENV
+        value: production
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DATABASE
+        value: shopally
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_TLS
+        value: "true"
+
+  - type: worker
+    name: shopally-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerCommand: /app/worker
+    envVars:
+      - key: SERVER_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DATABASE
+        value: shopally
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_TLS
+        value: "true"

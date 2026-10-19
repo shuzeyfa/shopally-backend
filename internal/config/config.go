@@ -52,6 +52,7 @@ type Config struct {
 		Host            string `mapstructure:"host"`
 		Port            string `mapstructure:"port"`
 		Password        string `mapstructure:"password"`
+		TLS             bool   `mapstructure:"tls"`
 		DB              int    `mapstructure:"db"`
 		ViewTrackingTTL int    `mapstructure:"view_tracking_ttl"`
 		KeyPrefix       string `mapstructure:"key_prefix"`
@@ -117,6 +118,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.host", "localhost")
 	v.SetDefault("redis.port", "6379")
 	v.SetDefault("redis.password", "")
+	v.SetDefault("redis.tls", false)
 	v.SetDefault("redis.db", 0)
 	v.SetDefault("redis.view_tracking_ttl", 86400)
 	v.SetDefault("redis.key_prefix", "sa:")

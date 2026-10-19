@@ -43,6 +43,7 @@ redis:
   host: localhost
   port: "6379"
   password: ""
+  tls: false
   db: 0
   view_tracking_ttl: 86400
   key_prefix: "sa:"

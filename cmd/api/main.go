@@ -123,7 +123,7 @@ func connectMongo(uri string) *mongo.Client {
 
 // connectRedis pings Redis and returns nil if it is unreachable.
 func connectRedis(cfg *config.Config) *platform.Client {
-	rdb := platform.NewRedisClient(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password, cfg.Redis.DB)
+	rdb := platform.NewRedisClient(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password, cfg.Redis.DB, cfg.Redis.TLS)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

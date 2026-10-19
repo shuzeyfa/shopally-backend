@@ -1,0 +1,9 @@
+.git
+.github
+.vscode
+configs/config.dev.yaml
+*.exe
+*.test
+coverage.out
+tmp
+vendor
