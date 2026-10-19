@@ -19,4 +19,10 @@ var (
 
 	// ErrFXUnrecognized means the FX provider replied in no shape we can parse.
 	ErrFXUnrecognized = errors.New("fx provider returned an unrecognized response")
+
+	// ErrProductNotFound means a requested product does not exist.
+	ErrProductNotFound = errors.New("product not found")
+
+	// ErrInvalidComparisonCount means fewer than 2 or more than 4 products were requested.
+	ErrInvalidComparisonCount = errors.New("comparison requires between 2 and 4 products")
 )

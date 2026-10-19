@@ -15,8 +15,9 @@ import (
 // Deps contains the handlers the router should mount.
 type Deps struct {
 	Health *apphandler.HealthHandler
-	Search *apphandler.SearchHandler
-	FX     *apphandler.FXHandler
+	Search  *apphandler.SearchHandler
+	FX      *apphandler.FXHandler
+	Compare *apphandler.CompareHandler
 
 	// Alerts is mounted behind RequireAuth and takes its owner from the
 	// verified token, never from the request body.
@@ -73,6 +74,9 @@ func Build(d Deps, opts Options) *gin.Engine {
 	}
 	if d.FX != nil {
 		api.GET("/fx", d.FX.GetFX)
+	}
+	if d.Compare != nil {
+		api.POST("/compare", d.Compare.Compare)
 	}
 
 	// Everything below identifies the caller, so it sits behind one group:

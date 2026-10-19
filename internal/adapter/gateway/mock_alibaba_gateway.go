@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/shopally-ai/pkg/domain"
@@ -82,4 +83,22 @@ func (m *MockAlibabaGateway) FetchProducts(ctx context.Context, query string, fi
 	}
 
 	return products, nil
+}
+
+func (m *MockAlibabaGateway) FetchProductsByIDs(ctx context.Context, ids []string) ([]*domain.Product, error) {
+	products, err := m.FetchProducts(ctx, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	wanted := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[strings.TrimSpace(id)] = struct{}{}
+	}
+	result := make([]*domain.Product, 0, len(wanted))
+	for _, product := range products {
+		if _, ok := wanted[product.ID]; ok {
+			result = append(result, product)
+		}
+	}
+	return result, nil
 }

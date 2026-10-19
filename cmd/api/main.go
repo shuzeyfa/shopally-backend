@@ -80,13 +80,15 @@ func main() {
 	)
 
 	alertManager := usecase.NewAlertManager(repository.NewMockAlertRepository())
+	compareUC := usecase.NewCompareProductsUseCase(gateway.NewMockAlibabaGateway(), cache)
 
 	engine := router.Build(
 		router.Deps{
-			Health: handler.NewHealthHandler(healthChecks(mongoClient, redisClient)),
-			Search: handler.NewSearchHandler(searchUC),
-			FX:     handler.NewFXHandler(fxClient),
-			Alerts: handler.NewAlertHandler(alertManager),
+			Health:  handler.NewHealthHandler(healthChecks(mongoClient, redisClient)),
+			Search:  handler.NewSearchHandler(searchUC),
+			FX:      handler.NewFXHandler(fxClient),
+			Compare: handler.NewCompareHandler(compareUC),
+			Alerts:  handler.NewAlertHandler(alertManager),
 		},
 		router.Options{
 			BasePath:       "/api/v1",
