@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,7 @@ func NewSearchHandler(uc *usecase.SearchProductsUseCase) *SearchHandler {
 	return &SearchHandler{uc: uc}
 }
 
-// Search handles GET /search?q=.
+// Search handles GET /search?q=&limit=.
 func (h *SearchHandler) Search(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
@@ -35,6 +36,16 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		log.Printf("search request_id=%s q=%q error=%v", RequestIDFrom(c), q, err)
 		respondError(c, http.StatusInternalServerError, CodeInternal, "search failed")
 		return
+	}
+
+	// Optional limit query parameter
+	if limitStr := strings.TrimSpace(c.Query("limit")); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit < len(data.Products) {
+			data = &usecase.SearchResult{
+				Products: data.Products[:limit],
+				Total:    limit,
+			}
+		}
 	}
 
 	respondOK(c, http.StatusOK, data)

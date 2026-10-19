@@ -2,8 +2,20 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
+	"time"
+
+	"github.com/shopally-ai/pkg/domain"
 )
+
+// SearchResult is the typed payload returned by the product search use case.
+type SearchResult struct {
+	Products []*domain.Product `json:"products"`
+	Total    int               `json:"total"`
+}
 
 // SearchProductsUseCase contains the business logic for searching products.
 // It orchestrates calls to external gateways (LLM, Alibaba, Cache).
@@ -23,8 +35,26 @@ func NewSearchProductsUseCase(ag AlibabaGateway, lg LLMGateway, cache ICachePort
 	}
 }
 
-// Search runs the search pipeline: parse intent, then fetch using it as filters.
-func (uc *SearchProductsUseCase) Search(ctx context.Context, query string) (interface{}, error) {
+// Search runs the search pipeline: checks the cache first, parses intent with LLM,
+// fetches matching products from Alibaba, and populates the cache.
+func (uc *SearchProductsUseCase) Search(ctx context.Context, query string) (*SearchResult, error) {
+	normQuery := strings.ToLower(strings.TrimSpace(query))
+	cacheKey := fmt.Sprintf("search:%s", normQuery)
+
+	// Check cache if configured
+	if uc.cache != nil {
+		if cached, found, err := uc.cache.Get(ctx, cacheKey); err == nil && found && cached != "" {
+			var cachedRes SearchResult
+			if err := json.Unmarshal([]byte(cached), &cachedRes); err == nil {
+				return &cachedRes, nil
+			}
+			log.Printf("search: cache unmarshal failed for key=%s: %v", cacheKey, err)
+		} else if err != nil {
+			log.Printf("search: cache read error for key=%s: %v", cacheKey, err)
+		}
+	}
+
+	// Parse user query intent using LLM gateway
 	intent, err := uc.llmGateway.ParseIntent(ctx, query)
 	if err != nil {
 		// Intent parsing is an enhancement, not a hard requirement: fall back
@@ -38,5 +68,20 @@ func (uc *SearchProductsUseCase) Search(ctx context.Context, query string) (inte
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"products": products}, nil
+
+	res := &SearchResult{
+		Products: products,
+		Total:    len(products),
+	}
+
+	// Store in cache for 10 minutes
+	if uc.cache != nil {
+		if bytes, err := json.Marshal(res); err == nil {
+			if err := uc.cache.Set(ctx, cacheKey, string(bytes), 10*time.Minute); err != nil {
+				log.Printf("search: cache write error for key=%s: %v", cacheKey, err)
+			}
+		}
+	}
+
+	return res, nil
 }
