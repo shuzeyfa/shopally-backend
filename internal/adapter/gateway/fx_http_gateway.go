@@ -50,17 +50,23 @@ func (g *FXHTTPGateway) GetRate(ctx context.Context, from, to string) (float64, 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return 0, err
+		// url.Error embeds the full URL, key included.
+		log.Printf("fx request could not be built url=%s err=%s", g.redact(reqURL), g.redact(err.Error()))
+		return 0, usecase.ErrFXUnavailable
 	}
 	resp, err := g.HTTPClient.Do(req)
 	if err != nil {
-		return 0, err
+		// The transport's error text carries the request URL too, so it gets the
+		// same redaction treatment as the body before it reaches a log sink.
+		log.Printf("fx request failed url=%s err=%s", g.redact(reqURL), g.redact(err.Error()))
+		return 0, usecase.ErrFXUnavailable
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		log.Printf("fx response unreadable url=%s err=%s", g.redact(reqURL), g.redact(err.Error()))
+		return 0, usecase.ErrFXUnavailable
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Log the body for diagnosis; never return it. Providers frequently

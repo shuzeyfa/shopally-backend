@@ -18,9 +18,8 @@ type Deps struct {
 	Search *apphandler.SearchHandler
 	FX     *apphandler.FXHandler
 
-	// Alerts is accepted but deliberately not mounted yet: its handlers
-	// require an authenticated user ID, and the auth middleware does not
-	// exist. Mounting it now would expose unowned alert mutations.
+	// Alerts is mounted behind RequireAuth and takes its owner from the
+	// verified token, never from the request body.
 	Alerts *apphandler.AlertHandler
 }
 
@@ -30,6 +29,10 @@ type Options struct {
 	BasePath string
 	// AllowedOrigins is the CORS allowlist. Empty rejects all cross-origin calls.
 	AllowedOrigins []string
+	// AuthSecret verifies the frontend's HS256 API tokens. Anything shorter
+	// than apphandler.MinTokenSecretLength makes every protected route answer
+	// 401 rather than serve traffic behind a weak key.
+	AuthSecret []byte
 	// Production switches gin out of debug mode.
 	Production bool
 }
@@ -70,6 +73,20 @@ func Build(d Deps, opts Options) *gin.Engine {
 	}
 	if d.FX != nil {
 		api.GET("/fx", d.FX.GetFX)
+	}
+
+	// Everything below identifies the caller, so it sits behind one group:
+	// adding a route to `protected` is the whole opt-in, and nothing can be
+	// mounted authenticated by accident.
+	protected := api.Group("")
+	protected.Use(apphandler.RequireAuth(opts.AuthSecret))
+
+	protected.GET("/me", apphandler.Me)
+
+	if d.Alerts != nil {
+		protected.POST("/alerts", d.Alerts.CreateAlert)
+		protected.GET("/alerts/:id", d.Alerts.GetAlert)
+		protected.DELETE("/alerts/:id", d.Alerts.DeleteAlert)
 	}
 
 	return r

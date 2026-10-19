@@ -34,8 +34,10 @@ type Config struct {
 	} `mapstructure:"cors"`
 
 	Auth struct {
-		// Shared with the frontend's NEXTAUTH_SECRET. The Next.js app mints an
-		// HS256 token with this secret; RequireAuth validates it.
+		// Signs the short-lived HS256 API tokens the Next.js app mints after a
+		// Google sign-in; RequireAuth verifies them. This is a dedicated secret,
+		// deliberately not reused as the frontend's NEXTAUTH_SECRET, so rotating
+		// one does not invalidate the other.
 		JWTSecret string `mapstructure:"jwt_secret"`
 	} `mapstructure:"auth"`
 

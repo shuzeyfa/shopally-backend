@@ -106,8 +106,8 @@ const userIDKey = "userID"
 //
 // The value is populated by RequireAuth from a verified bearer token, never
 // from client-supplied request data. Handlers that call this must sit behind
-// RequireAuth; until that middleware exists the routes needing it stay
-// unmounted, so this reports false and those handlers answer 401.
+// RequireAuth; the check here reports false only as a backstop, and those
+// handlers answer 401 rather than falling back to a caller-supplied ID.
 func UserIDFrom(c *gin.Context) (string, bool) {
 	v, ok := c.Get(userIDKey)
 	if !ok {

@@ -28,8 +28,8 @@ cors:
   allowed_origins: "http://localhost:3000"
 
 auth:
-  # Must match the frontend's NEXTAUTH_SECRET exactly. The Next.js app signs an
-  # HS256 token with this value and the API verifies it. Generate one with:
+  # Dedicated secret used to verify the frontend's short-lived HS256 API tokens.
+  # Must match the frontend's AUTH_JWT_SECRET (at least 32 characters). Generate one with:
   #   openssl rand -base64 32
   jwt_secret: ""
 

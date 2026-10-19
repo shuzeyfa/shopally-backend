@@ -30,6 +30,18 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	// Validated here rather than in LoadConfig: an empty secret is fine for a
+	// local run that never touches a protected route, but shipping one to
+	// production would leave /me and /alerts permanently 401.
+	if len(cfg.Auth.JWTSecret) < handler.MinTokenSecretLength {
+		if cfg.IsProduction() {
+			log.Fatalf("auth.jwt_secret (AUTH_JWT_SECRET) must be at least %d characters; generate one with: openssl rand -base64 32",
+				handler.MinTokenSecretLength)
+		}
+		log.Printf("WARNING: auth.jwt_secret (AUTH_JWT_SECRET) is unset or shorter than %d characters; requests to /me and /alerts will be rejected until it is set",
+			handler.MinTokenSecretLength)
+	}
+
 	// Mongo and Redis are both optional at startup. Nothing on the currently
 	// mounted routes needs them, so an outage degrades /healthz rather than
 	// preventing the API from serving search and FX.
@@ -79,6 +91,7 @@ func main() {
 		router.Options{
 			BasePath:       "/api/v1",
 			AllowedOrigins: cfg.CORSOrigins(),
+			AuthSecret:     []byte(cfg.Auth.JWTSecret),
 			Production:     cfg.IsProduction(),
 		},
 	)
