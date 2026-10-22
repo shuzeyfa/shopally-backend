@@ -1,0 +1,38 @@
+# golangci-lint configuration for ShopAlly backend.
+# Pin the enabled linters explicitly so that upgrading golangci-lint
+# to a new "latest" version does not silently add opinionated checks
+# and break CI.
+run:
+  timeout: 5m
+  # Only lint code we write; skip generated and vendor directories.
+  skip-dirs:
+    - vendor
+
+linters:
+  disable-all: true
+  enable:
+    # Core correctness
+    - errcheck      # report unchecked errors
+    - govet         # go vet checks
+    - staticcheck   # staticcheck analysis suite
+    - unused        # report unused code
+    # Style / quality
+    - gofmt         # formatting
+    - goimports     # import ordering
+    - misspell      # common English misspellings
+    - gosimple      # simplification hints
+    - ineffassign   # detect ineffectual assignments
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/shopally-ai
+
+issues:
+  # Show all issues, not just the first 3 per linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Don't fail on test files for these style linters.
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
