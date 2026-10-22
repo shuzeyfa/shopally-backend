@@ -39,10 +39,9 @@ jobs:
 
       # --- Step 2: CODE QUALITY CHECKS ---
       - name: 🧹 3. Run Linter (golangci-lint)
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          install-mode: goinstall
 
       - name: 🎨 4. Check Code Formatting (gofmt)
         run: |
