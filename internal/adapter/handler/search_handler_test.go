@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/shopally-ai/internal/adapter/gateway"
-	"github.com/shopally-ai/pkg/usecase"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/shopally-ai/internal/adapter/gateway"
+	"github.com/shopally-ai/pkg/usecase"
 )
 
 func TestSearchHandler_MissingQuery(t *testing.T) {

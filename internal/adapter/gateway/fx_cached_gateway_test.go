@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopally-ai/internal/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/shopally-ai/internal/mocks"
 )
 
 type CachedFXClientSuite struct {

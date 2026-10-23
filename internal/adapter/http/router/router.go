@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
 	apphandler "github.com/shopally-ai/internal/adapter/handler"
 )
 

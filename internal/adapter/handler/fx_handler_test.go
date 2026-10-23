@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/shopally-ai/internal/mocks"
 	"github.com/shopally-ai/pkg/usecase"
-	"github.com/stretchr/testify/suite"
 )
 
 type FXHandlerSuite struct {

@@ -8,11 +8,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/shopally-ai/pkg/domain"
-	"github.com/shopally-ai/pkg/usecase"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"github.com/shopally-ai/pkg/domain"
+	"github.com/shopally-ai/pkg/usecase"
 )
 
 type MongoSavedRepository struct {
