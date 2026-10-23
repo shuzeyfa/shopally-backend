@@ -95,6 +95,18 @@ Error codes: `INVALID_INPUT`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`,
 | `GET` | `/api/v1/alerts/:id` | Bearer token | Get one of the caller's alerts |
 | `DELETE` | `/api/v1/alerts/:id` | Bearer token | Remove one of the caller's alerts |
 
+### Authentication
+
+Protected routes accept the frontend's HS256 bearer token, not NextAuth's
+encrypted session cookie. Set the same dedicated `AUTH_JWT_SECRET` on both
+hosts (at least 32 UTF-8 bytes); `NEXTAUTH_SECRET` is frontend-only.
+Required claims are `iss=shopally-web`, `aud=shopally-api`, a nonempty `sub`,
+`iat` and `exp`. Expiry must follow issuance; time checks allow 30 seconds
+of clock skew. Retired `demo-` identities and other signing algorithms are
+rejected. The frontend renews expiring API tokens during valid sessions.
+`GET /api/v1/me` returns the verified subject and display email/name.
+Saved items and alerts always use that subject as the owner.
+
 ### Price alerts
 
 Alerts are stored in the configured Mongo collection (`mongo.alert_collection`).

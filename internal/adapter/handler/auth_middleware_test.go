@@ -246,6 +246,76 @@ func (s *AuthMiddlewareSuite) TestRequireAuth_Success_SetsContext() {
 	s.Equal("Alice Doe", gotName)
 }
 
+func (s *AuthMiddlewareSuite) TestRequireAuth_ClaimAndAlgorithmRules() {
+	cases := []struct {
+		name   string
+		change func(*apiTokenClaims)
+		method jwt.SigningMethod
+	}{
+		{name: "missing expiry", change: func(c *apiTokenClaims) { c.ExpiresAt = nil }},
+		{name: "missing issued at", change: func(c *apiTokenClaims) { c.IssuedAt = nil }},
+		{name: "missing issuer", change: func(c *apiTokenClaims) { c.Issuer = "" }},
+		{name: "missing audience", change: func(c *apiTokenClaims) { c.Audience = nil }},
+		{name: "future issued at", change: func(c *apiTokenClaims) {
+			c.IssuedAt = jwt.NewNumericDate(time.Now().Add(5 * time.Minute))
+		}},
+		{name: "future not before", change: func(c *apiTokenClaims) {
+			c.NotBefore = jwt.NewNumericDate(time.Now().Add(5 * time.Minute))
+		}},
+		{name: "inverted interval", change: func(c *apiTokenClaims) {
+			c.IssuedAt = jwt.NewNumericDate(time.Now().Add(20 * time.Second))
+			c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(10 * time.Second))
+		}},
+		{name: "wrong algorithm", method: jwt.SigningMethodHS384},
+		{name: "unsigned", method: jwt.SigningMethodNone},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			claims := s.validClaims()
+			if tc.change != nil {
+				tc.change(claims)
+			}
+			method := tc.method
+			var key interface{} = s.secret
+			if method == nil {
+				method = jwt.SigningMethodHS256
+			}
+			if method == jwt.SigningMethodNone {
+				key = jwt.UnsafeAllowNoneSignatureType
+			}
+			token, err := jwt.NewWithClaims(method, claims).SignedString(key)
+			s.Require().NoError(err)
+			r := gin.New()
+			r.Use(RequireAuth(s.secret))
+			called := false
+			r.GET("/protected", func(c *gin.Context) { called = true })
+			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			rr := httptest.NewRecorder()
+			r.ServeHTTP(rr, req)
+			s.Equal(http.StatusUnauthorized, rr.Code)
+			s.False(called)
+			var resp Envelope
+			s.Require().NoError(json.Unmarshal(rr.Body.Bytes(), &resp))
+			s.Require().NotNil(resp.Error)
+			s.Equal("authentication required", resp.Error.Message)
+		})
+	}
+}
+
+func (s *AuthMiddlewareSuite) TestRequireAuth_ClockSkewAndBearerCase() {
+	claims := s.validClaims()
+	claims.IssuedAt = jwt.NewNumericDate(time.Now().Add(10 * time.Second))
+	r := gin.New()
+	r.Use(RequireAuth(s.secret))
+	r.GET("/me", Me)
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.Header.Set("Authorization", "bEaReR "+s.signToken(claims, s.secret))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	s.Equal(http.StatusOK, rr.Code)
+}
+
 func (s *AuthMiddlewareSuite) TestMeHandler_Success() {
 	r := gin.New()
 	r.Use(RequireAuth(s.secret))

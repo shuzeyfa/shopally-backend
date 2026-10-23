@@ -12,8 +12,7 @@ import (
 
 const (
 	// MinTokenSecretLength is the shortest HMAC secret accepted for API tokens.
-	// 32 bytes is the output size of the underlying hash, so anything shorter
-	// adds no security while looking like it does.
+	// HS256 keys must be at least as large as the hash output (RFC 7518).
 	MinTokenSecretLength = 32
 
 	// TokenIssuer is the exact iss claim the frontend stamps on minted tokens.
@@ -92,6 +91,12 @@ func RequireAuth(secret []byte) gin.HandlerFunc {
 			// The parser's messages name the failure (expired, wrong audience,
 			// bad signature) and never echo the token itself.
 			unauthorized(c, "invalid token: "+err.Error())
+			return
+		}
+		// WithIssuedAt checks a supplied iat but does not require its presence.
+		// The frontend contract always includes a bounded validity interval.
+		if claims.IssuedAt == nil || !claims.ExpiresAt.After(claims.IssuedAt.Time) {
+			unauthorized(c, "token has no valid issuance interval")
 			return
 		}
 		if strings.TrimSpace(claims.Subject) == "" {
