@@ -127,7 +127,12 @@ func (g *FXHTTPGateway) redact(s string) string {
 	if g.APIKey == "" {
 		return s
 	}
-	return strings.ReplaceAll(s, g.APIKey, "***")
+	// Keys containing reserved characters appear URL-encoded in transport
+	// errors and provider responses, not necessarily as the original string.
+	for _, key := range []string{url.QueryEscape(g.APIKey), url.PathEscape(g.APIKey), g.APIKey} {
+		s = strings.ReplaceAll(s, key, "***")
+	}
+	return s
 }
 
 func (g *FXHTTPGateway) buildRequestURL(from, to string) string {

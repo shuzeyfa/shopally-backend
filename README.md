@@ -46,14 +46,27 @@ underscores, and override the file. Hosted deploys use these exclusively:
 | `auth.jwt_secret` | `AUTH_JWT_SECRET` | Must equal the frontend's dedicated `AUTH_JWT_SECRET` |
 | `mongo.uri` | `MONGO_URI` | |
 | `redis.host` / `redis.port` | `REDIS_HOST` / `REDIS_PORT` | Set `REDIS_TLS=true` for TLS-protected providers such as Upstash |
-| `fx.api_url` / `fx.api_key` | `FX_API_URL` / `FX_API_KEY` | Empty uses the keyless exchangerate.host default |
+| `fx.api_url` / `fx.api_key` | `FX_API_URL` / `FX_API_KEY` | Configure a supported provider; the legacy default now requires authentication |
 
 See `configs/config.dev.example.yaml` for the full set.
 
-Mongo and Redis are both **optional at startup**. If either is unreachable the
-API still serves search and FX; `/healthz` reports the degradation. Saved-item
-requests return `503` while Mongo is unavailable. Without Redis, FX rates are
-fetched per request instead of cached.
+Mongo and Redis are both **optional at startup**. The API starts listening
+immediately and connects to each dependency independently in the background.
+Failed initial connections retry every five seconds after each bounded attempt.
+When a connection succeeds, repositories and caching become available without
+a restart. Once connected, the drivers handle subsequent network outages.
+The worker uses the same recovery behavior and warms FX when Redis connects.
+
+`/healthz` returns `503` while either dependency is unavailable and `200` once
+both are reachable. Search remains available during an outage; authenticated
+saved-item and alert requests return `503` while Mongo is unavailable. Without
+Redis, FX calls bypass caching and still require a working provider. Shutdown
+cancels pending connection attempts and worker tasks before releasing clients.
+
+Missing config files are supported; malformed or unreadable files are errors.
+Local `.env` files are not loaded automatically: export environment variables
+or use the optional YAML file. Docker excludes `.env`, its variants, and the
+local development YAML from the build context.
 
 ## API
 

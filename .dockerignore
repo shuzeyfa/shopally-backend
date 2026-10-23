@@ -1,6 +1,9 @@
 .git
 .github
 .vscode
+.env
+.env.*
+!.env.example
 configs/config.dev.yaml
 *.exe
 *.test

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,12 +16,20 @@ import (
 )
 
 type MongoAlertRepository struct {
-	collection *mongo.Collection
+	collection atomic.Pointer[mongo.Collection]
 }
 
 func NewMongoAlertRepository(client *mongo.Client, database, collection string) *MongoAlertRepository {
+	r := &MongoAlertRepository{}
+	r.Rebind(client, database, collection)
+	return r
+}
+
+// Rebind attaches the repository to a Mongo client after a late connection.
+func (r *MongoAlertRepository) Rebind(client *mongo.Client, database, collection string) {
 	if client == nil {
-		return &MongoAlertRepository{}
+		r.collection.Store(nil)
+		return
 	}
 	if database == "" {
 		database = "shopally"
@@ -28,25 +37,27 @@ func NewMongoAlertRepository(client *mongo.Client, database, collection string) 
 	if collection == "" {
 		collection = "alerts"
 	}
-	return &MongoAlertRepository{collection: client.Database(database).Collection(collection)}
+	r.collection.Store(client.Database(database).Collection(collection))
 }
 
 func (r *MongoAlertRepository) CreateAlert(ctx context.Context, alert *domain.Alert) error {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return usecase.ErrAlertStoreUnavailable
 	}
 	if alert.ID == "" {
 		alert.ID = uuid.NewString()
 	}
-	_, err := r.collection.InsertOne(ctx, alert)
+	_, err := collection.InsertOne(ctx, alert)
 	return err
 }
 
 func (r *MongoAlertRepository) ListAlerts(ctx context.Context, userID string) ([]*domain.Alert, error) {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return nil, usecase.ErrAlertStoreUnavailable
 	}
-	cursor, err := r.collection.Find(ctx, bson.M{"user_id": userID}, options.Find().SetSort(bson.D{{Key: "_id", Value: -1}}))
+	cursor, err := collection.Find(ctx, bson.M{"user_id": userID}, options.Find().SetSort(bson.D{{Key: "_id", Value: -1}}))
 	if err != nil {
 		return nil, err
 	}
@@ -63,11 +74,12 @@ func (r *MongoAlertRepository) ListAlerts(ctx context.Context, userID string) ([
 }
 
 func (r *MongoAlertRepository) GetAlert(ctx context.Context, userID, alertID string) (*domain.Alert, error) {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return nil, usecase.ErrAlertStoreUnavailable
 	}
 	var alert domain.Alert
-	err := r.collection.FindOne(ctx, bson.M{"_id": alertID, "user_id": userID}).Decode(&alert)
+	err := collection.FindOne(ctx, bson.M{"_id": alertID, "user_id": userID}).Decode(&alert)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, fmt.Errorf("alert %s: %w", alertID, usecase.ErrAlertNotFound)
 	}
@@ -78,10 +90,11 @@ func (r *MongoAlertRepository) GetAlert(ctx context.Context, userID, alertID str
 }
 
 func (r *MongoAlertRepository) DeleteAlert(ctx context.Context, userID, alertID string) error {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return usecase.ErrAlertStoreUnavailable
 	}
-	result, err := r.collection.DeleteOne(ctx, bson.M{"_id": alertID, "user_id": userID})
+	result, err := collection.DeleteOne(ctx, bson.M{"_id": alertID, "user_id": userID})
 	if err != nil {
 		return err
 	}
@@ -92,10 +105,11 @@ func (r *MongoAlertRepository) DeleteAlert(ctx context.Context, userID, alertID 
 }
 
 func (r *MongoAlertRepository) ListActiveAlerts(ctx context.Context) ([]*domain.Alert, error) {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return nil, usecase.ErrAlertStoreUnavailable
 	}
-	cursor, err := r.collection.Find(ctx, bson.M{"is_active": true})
+	cursor, err := collection.Find(ctx, bson.M{"is_active": true})
 	if err != nil {
 		return nil, err
 	}
@@ -112,10 +126,11 @@ func (r *MongoAlertRepository) ListActiveAlerts(ctx context.Context) ([]*domain.
 }
 
 func (r *MongoAlertRepository) MarkAlertTriggered(ctx context.Context, alertID string, price float64, at time.Time) error {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return usecase.ErrAlertStoreUnavailable
 	}
-	result, err := r.collection.UpdateOne(ctx, bson.M{"_id": alertID, "is_active": true}, bson.M{"$set": bson.M{
+	result, err := collection.UpdateOne(ctx, bson.M{"_id": alertID, "is_active": true}, bson.M{"$set": bson.M{
 		"is_active": false, "triggered_at": at, "triggered_price": price,
 	}})
 	if err != nil {

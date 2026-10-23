@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/shopally-ai/internal/adapter/gateway"
 	"github.com/shopally-ai/internal/adapter/handler"
 	"github.com/shopally-ai/internal/adapter/http/router"
@@ -17,8 +19,6 @@ import (
 	"github.com/shopally-ai/internal/config"
 	"github.com/shopally-ai/internal/platform"
 	"github.com/shopally-ai/pkg/usecase"
-
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // shutdownGrace bounds how long in-flight requests get to finish.
@@ -42,55 +42,67 @@ func main() {
 			handler.MinTokenSecretLength)
 	}
 
-	// Mongo and Redis are optional at startup. An outage degrades /healthz
-	// rather than preventing the API from serving search and FX; saved-item
-	// requests return a storage-unavailable response until Mongo recovers.
-	mongoClient := connectMongo(cfg.Mongo.URI)
+	ctx, stopDeps := context.WithCancel(context.Background())
+	defer stopDeps()
+
+	conns := platform.NewServiceConnections(
+		cfg.Mongo.URI,
+		cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password,
+		cfg.Redis.DB, cfg.Redis.TLS,
+	)
 	defer func() {
-		if mongoClient == nil {
-			return
-		}
-		if err := platform.Disconnect(mongoClient); err != nil {
-			log.Printf("mongo disconnect: %v", err)
+		if err := conns.Close(); err != nil {
+			log.Printf("dependency shutdown: %v", err)
 		}
 	}()
 
-	redisClient := connectRedis(cfg)
+	alertRepo := repository.NewMongoAlertRepository(conns.MongoClient(), cfg.Mongo.Database, cfg.Mongo.AlertCollection)
+	savedRepo := repository.NewMongoSavedRepository(conns.MongoClient(), cfg.Mongo.Database, cfg.Mongo.SavedCollection)
 
-	// A nil cache is a supported configuration: the use case falls back to
-	// calling the gateways directly.
-	var cache usecase.ICachePort
-	if redisClient != nil {
-		cache = gateway.NewRedisCache(redisClient.Client, cfg.Redis.KeyPrefix)
+	switchableCache := gateway.NewSwitchableCache(nil)
+	var lastRedis *redis.Client
+
+	syncRuntime := func() {
+		alertRepo.Rebind(conns.MongoClient(), cfg.Mongo.Database, cfg.Mongo.AlertCollection)
+		savedRepo.Rebind(conns.MongoClient(), cfg.Mongo.Database, cfg.Mongo.SavedCollection)
+
+		rc := conns.RedisClient()
+		if rc == nil {
+			return
+		}
+		if rc.Client == lastRedis {
+			return
+		}
+		lastRedis = rc.Client
+		switchableCache.Replace(gateway.NewRedisCache(rc.Client, cfg.Redis.KeyPrefix))
+		log.Println("redis cache active")
 	}
 
-	// Product and intent data come from mocks for now. Both sit behind the
-	// gateway interfaces, so swapping in the real HTTP adapters is a change
-	// to these two lines only.
+	conns.StartBackgroundRetry(ctx, 5*time.Second, syncRuntime)
+
 	searchUC := usecase.NewSearchProductsUseCase(
 		gateway.NewMockAlibabaGateway(),
 		gateway.NewMockLLMGateway(),
-		cache,
+		switchableCache,
 	)
 
 	fxClient := gateway.NewCachedFXClient(
 		gateway.NewFXHTTPGateway(cfg.FX.APIURL, cfg.FX.APIKEY, nil),
-		cache,
+		switchableCache,
 		time.Duration(cfg.FX.CacheTTLSeconds)*time.Second,
 	)
 
-	alertManager := usecase.NewAlertManager(repository.NewMongoAlertRepository(mongoClient, cfg.Mongo.Database, cfg.Mongo.AlertCollection))
-	savedRepository := repository.NewMongoSavedRepository(mongoClient, cfg.Mongo.Database, cfg.Mongo.SavedCollection)
-	compareUC := usecase.NewCompareProductsUseCase(gateway.NewMockAlibabaGateway(), cache)
+	alertManager := usecase.NewAlertManager(alertRepo)
+	compareUC := usecase.NewCompareProductsUseCase(gateway.NewMockAlibabaGateway(), switchableCache)
 
 	engine := router.Build(
 		router.Deps{
-			Health:  handler.NewHealthHandler(healthChecks(mongoClient, redisClient)),
+			Health:  handler.NewHealthHandler(healthChecks(conns)),
 			Search:  handler.NewSearchHandler(searchUC),
 			FX:      handler.NewFXHandler(fxClient),
 			Compare: handler.NewCompareHandler(compareUC),
 			Alerts:  handler.NewAlertHandler(alertManager),
-			Saved:   handler.NewSavedHandler(savedRepository),
+			Saved:   handler.NewSavedHandler(savedRepo),
 		},
 		router.Options{
 			BasePath:       "/api/v1",
@@ -106,59 +118,22 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	serveUntilSignal(srv, cfg.CORSOrigins())
-}
-
-// connectMongo attempts a connection and returns nil on failure rather than
-// exiting, so a Mongo outage cannot take the whole API down.
-func connectMongo(uri string) *mongo.Client {
-	client, err := platform.Connect(uri)
-	if err != nil {
-		log.Printf("mongo unavailable at startup, continuing without it: %v", err)
-		return nil
-	}
-	log.Println("mongo connected")
-	return client
-}
-
-// connectRedis pings Redis and returns nil if it is unreachable.
-func connectRedis(cfg *config.Config) *platform.Client {
-	rdb := platform.NewRedisClient(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Password, cfg.Redis.DB, cfg.Redis.TLS)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := rdb.Ping(ctx); err != nil {
-		log.Printf("redis unavailable at startup, continuing without cache: %v", err)
-		return nil
-	}
-	log.Println("redis connected")
-	return rdb
+	serveUntilSignal(srv, cfg.CORSOrigins(), stopDeps)
 }
 
 // healthChecks builds the dependency probes for /healthz. Each closure
 // re-checks live, so a dependency that recovers is reported as healthy
 // without needing a restart.
-func healthChecks(mongoClient *mongo.Client, redisClient *platform.Client) map[string]handler.DependencyCheck {
+func healthChecks(conns *platform.ServiceConnections) map[string]handler.DependencyCheck {
 	return map[string]handler.DependencyCheck{
-		"mongo": func(ctx context.Context) error {
-			if mongoClient == nil {
-				return errors.New("not connected at startup")
-			}
-			return mongoClient.Ping(ctx, nil)
-		},
-		"redis": func(ctx context.Context) error {
-			if redisClient == nil {
-				return errors.New("not connected at startup")
-			}
-			return redisClient.Client.Ping(ctx).Err()
-		},
+		"mongo": conns.PingMongo,
+		"redis": conns.PingRedis,
 	}
 }
 
 // serveUntilSignal runs the server and drains it on SIGINT/SIGTERM so hosted
 // deploys and container restarts do not sever in-flight requests.
-func serveUntilSignal(srv *http.Server, origins []string) {
+func serveUntilSignal(srv *http.Server, origins []string, stopDeps context.CancelFunc) {
 	errCh := make(chan error, 1)
 
 	go func() {
@@ -170,6 +145,7 @@ func serveUntilSignal(srv *http.Server, origins []string) {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stop)
 
 	select {
 	case err := <-errCh:
@@ -177,6 +153,8 @@ func serveUntilSignal(srv *http.Server, origins []string) {
 	case sig := <-stop:
 		log.Printf("received %s, shutting down", sig)
 	}
+
+	stopDeps()
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()

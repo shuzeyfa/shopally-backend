@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -116,3 +120,25 @@ func (s *FXHTTPGatewaySuite) TestBuildRequestURLVariants() {
 }
 
 func TestFXHTTPGatewaySuite(t *testing.T) { suite.Run(t, new(FXHTTPGatewaySuite)) }
+
+func TestFXFailureRedactsEncodedKey(t *testing.T) {
+	const key = "test/key+with=reserved&characters"
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previousOutput)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, r.URL.String()+" "+key, http.StatusBadGateway)
+	}))
+	defer server.Close()
+	gateway := NewFXHTTPGateway(server.URL+"?apikey={APIKEY}", key, server.Client())
+	_, err := gateway.GetRate(context.Background(), "USD", "ETB")
+	if err == nil {
+		t.Fatal("expected an opaque provider error")
+	}
+	for _, sensitive := range []string{key, url.QueryEscape(key), url.PathEscape(key)} {
+		if strings.Contains(err.Error(), sensitive) || strings.Contains(logs.String(), sensitive) {
+			t.Fatal("FX failure leaked an API key")
+		}
+	}
+}

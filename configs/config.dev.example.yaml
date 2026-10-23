@@ -49,7 +49,8 @@ redis:
   key_prefix: "sa:"
 
 fx:
-  # Leave api_url empty to use the keyless exchangerate.host default.
+  # Empty api_url uses the legacy exchangerate.host endpoint, which now
+  # requires authentication. Configure a provider URL and key as needed.
   # Supported providers and their URL shapes (placeholders are substituted):
   #   https://api.exchangerate.host/convert?from={FROM}&to={TO}
   #   https://api.currencyfreaks.com/latest?apikey={APIKEY}&symbols={TO}

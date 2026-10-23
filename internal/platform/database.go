@@ -10,7 +10,12 @@ import (
 
 // Connect establishes a new MongoDB client connection
 func Connect(uri string) (*mongo.Client, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return ConnectContext(context.Background(), uri)
+}
+
+// ConnectContext bounds connection attempts and releases failed clients.
+func ConnectContext(parent context.Context, uri string) (*mongo.Client, error) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	if err != nil {
@@ -19,6 +24,7 @@ func Connect(uri string) (*mongo.Client, error) {
 
 	// Ping to check connection
 	if err := client.Ping(ctx, nil); err != nil {
+		_ = Disconnect(client)
 		return nil, err
 	}
 	return client, nil

@@ -18,7 +18,10 @@ func isMissingConfigFile(err error) bool {
 		return true
 	}
 	var pathErr *fs.PathError
-	return errors.As(err, &pathErr)
+	if errors.As(err, &pathErr) {
+		return errors.Is(pathErr.Err, fs.ErrNotExist)
+	}
+	return false
 }
 
 type Config struct {

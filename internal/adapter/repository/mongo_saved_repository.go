@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/shopally-ai/pkg/domain"
@@ -15,12 +16,20 @@ import (
 )
 
 type MongoSavedRepository struct {
-	collection *mongo.Collection
+	collection atomic.Pointer[mongo.Collection]
 }
 
 func NewMongoSavedRepository(client *mongo.Client, database, collection string) *MongoSavedRepository {
+	r := &MongoSavedRepository{}
+	r.Rebind(client, database, collection)
+	return r
+}
+
+// Rebind attaches the repository to a Mongo client after a late connection.
+func (r *MongoSavedRepository) Rebind(client *mongo.Client, database, collection string) {
 	if client == nil {
-		return &MongoSavedRepository{}
+		r.collection.Store(nil)
+		return
 	}
 	if database == "" {
 		database = "shopally"
@@ -28,11 +37,12 @@ func NewMongoSavedRepository(client *mongo.Client, database, collection string) 
 	if collection == "" {
 		collection = "saved_items"
 	}
-	return &MongoSavedRepository{collection: client.Database(database).Collection(collection)}
+	r.collection.Store(client.Database(database).Collection(collection))
 }
 
 func (r *MongoSavedRepository) Save(ctx context.Context, userID string, product *domain.Product) (*domain.SavedItem, error) {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return nil, usecase.ErrSavedStoreUnavailable
 	}
 	if product == nil || product.ID == "" {
@@ -49,18 +59,19 @@ func (r *MongoSavedRepository) Save(ctx context.Context, userID string, product 
 	options := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
 
 	var item domain.SavedItem
-	if err := r.collection.FindOneAndUpdate(ctx, filter, update, options).Decode(&item); err != nil {
+	if err := collection.FindOneAndUpdate(ctx, filter, update, options).Decode(&item); err != nil {
 		return nil, err
 	}
 	return &item, nil
 }
 
 func (r *MongoSavedRepository) List(ctx context.Context, userID string) ([]*domain.SavedItem, error) {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return nil, usecase.ErrSavedStoreUnavailable
 	}
 
-	cursor, err := r.collection.Find(ctx, bson.M{"user_id": userID}, options.Find().SetSort(bson.D{{Key: "saved_at", Value: -1}}))
+	cursor, err := collection.Find(ctx, bson.M{"user_id": userID}, options.Find().SetSort(bson.D{{Key: "saved_at", Value: -1}}))
 	if err != nil {
 		return nil, err
 	}
@@ -81,10 +92,11 @@ func (r *MongoSavedRepository) List(ctx context.Context, userID string) ([]*doma
 }
 
 func (r *MongoSavedRepository) Delete(ctx context.Context, userID, productID string) error {
-	if r.collection == nil {
+	collection := r.collection.Load()
+	if collection == nil {
 		return usecase.ErrSavedStoreUnavailable
 	}
-	_, err := r.collection.DeleteOne(ctx, bson.M{
+	_, err := collection.DeleteOne(ctx, bson.M{
 		"_id":     savedItemID(userID, productID),
 		"user_id": userID,
 	})
