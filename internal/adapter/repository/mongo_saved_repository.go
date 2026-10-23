@@ -75,7 +75,8 @@ func (r *MongoSavedRepository) List(ctx context.Context, userID string) ([]*doma
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	// Cleanup is best effort; read and decode errors are returned below.
+	defer func() { _ = cursor.Close(ctx) }()
 
 	items := make([]*domain.SavedItem, 0)
 	for cursor.Next(ctx) {

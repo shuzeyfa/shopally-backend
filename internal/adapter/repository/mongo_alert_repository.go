@@ -61,7 +61,8 @@ func (r *MongoAlertRepository) ListAlerts(ctx context.Context, userID string) ([
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	// Cleanup is best effort; read and decode errors are returned below.
+	defer func() { _ = cursor.Close(ctx) }()
 	alerts := make([]*domain.Alert, 0)
 	for cursor.Next(ctx) {
 		var alert domain.Alert
@@ -113,7 +114,8 @@ func (r *MongoAlertRepository) ListActiveAlerts(ctx context.Context) ([]*domain.
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	// Cleanup is best effort; read and decode errors are returned below.
+	defer func() { _ = cursor.Close(ctx) }()
 	alerts := make([]*domain.Alert, 0)
 	for cursor.Next(ctx) {
 		var alert domain.Alert

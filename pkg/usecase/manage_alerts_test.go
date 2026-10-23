@@ -3,10 +3,11 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"github.com/shopally-ai/pkg/domain"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shopally-ai/pkg/domain"
 )
 
 type mockAlertRepository struct {

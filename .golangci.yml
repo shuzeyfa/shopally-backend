@@ -1,12 +1,8 @@
 # golangci-lint configuration for ShopAlly backend.
-# Pin the enabled linters explicitly so that upgrading golangci-lint
-# to a new "latest" version does not silently add opinionated checks
-# and break CI.
+# Keep this v1 configuration aligned with the pinned CI linter version.
 run:
   timeout: 5m
-  # Only lint code we write; skip generated and vendor directories.
-  skip-dirs:
-    - vendor
+  # Vendor directories are excluded by default.
 
 linters:
   disable-all: true
