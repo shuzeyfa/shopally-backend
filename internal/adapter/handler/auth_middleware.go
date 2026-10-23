@@ -98,6 +98,12 @@ func RequireAuth(secret []byte) gin.HandlerFunc {
 			unauthorized(c, "token has no subject")
 			return
 		}
+		// The retired demo provider derived identities from unverified emails.
+		// Reject its already-issued tokens as well as disabling new sign-ins.
+		if strings.HasPrefix(claims.Subject, "demo-") {
+			unauthorized(c, "demo accounts are no longer supported")
+			return
+		}
 
 		c.Set(userIDKey, claims.Subject)
 		c.Set(userEmailKey, claims.Email)

@@ -195,6 +195,27 @@ func (s *AuthMiddlewareSuite) TestRequireAuth_EmptySubject() {
 	s.Equal(http.StatusUnauthorized, rr.Code)
 }
 
+func (s *AuthMiddlewareSuite) TestRequireAuth_RetiredDemoToken() {
+	r := gin.New()
+	r.Use(RequireAuth(s.secret))
+	called := false
+	r.GET("/protected", func(c *gin.Context) {
+		called = true
+		c.Status(http.StatusOK)
+	})
+
+	claims := s.validClaims()
+	claims.Subject = "demo-previously-issued-account"
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+s.signToken(claims, s.secret))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	s.Equal(http.StatusUnauthorized, rr.Code)
+	s.False(called)
+	s.Contains(rr.Body.String(), `"code":"UNAUTHORIZED"`)
+}
+
 func (s *AuthMiddlewareSuite) TestRequireAuth_Success_SetsContext() {
 	r := gin.New()
 	r.Use(RequireAuth(s.secret))
